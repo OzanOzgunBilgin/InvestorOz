@@ -1,63 +1,62 @@
 import yfinance as yf
+from yfinance import EquityQuery
 import pandas as pd
-import numpy as np
-import requests
-import io
 from tqdm import tqdm
 
 # -----------------------------
 # CONFIG
 # -----------------------------
-MIN_AVG_VOLUME = 500_000     # liquidity filter
-LOOKBACK = 120               # history window
-BATCH_SIZE = 100             # tickers per yfinance bulk download call
-MIN_PRICE = 1.0              # filter out penny stocks
+MIN_AVG_VOLUME  = 500_000    # liquidity filter
+MIN_PRICE       = 1.0        # filter out penny stocks
+MIN_MARKET_CAP  = 50_000_000 # $50M minimum market cap
+LOOKBACK        = 120        # price history window (trading days)
+BATCH_SIZE      = 100        # tickers per yfinance bulk download
+SCREENER_PAGE   = 250        # max results per screener API call
 
 
 # -----------------------------
-# FETCH ALL US TICKERS
+# STEP 1: GET CANDIDATE TICKERS VIA SCREENER
+# Uses Yahoo Finance's own validated equity data — no stale/fake tickers.
 # -----------------------------
-def fetch_us_tickers():
-    urls = [
-        "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
-        "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
-    ]
-    tickers = set()
-    for url in urls:
-        try:
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-            df = pd.read_csv(io.StringIO(resp.text), sep="|")
-            if "Test Issue" in df.columns:
-                df = df[df["Test Issue"] == "N"]
-            col = "Symbol" if "Symbol" in df.columns else "ACT Symbol"
-            raw = df[col].dropna().astype(str).tolist()
-            valid = [t.strip() for t in raw if t.isalpha() and 1 <= len(t) <= 5]
-            tickers.update(valid)
-        except Exception as e:
-            print(f"Warning: could not fetch {url}: {e}")
-    return sorted(tickers)
+def get_candidate_tickers():
+    query = EquityQuery('and', [
+        EquityQuery('eq', ['region', 'us']),
+        EquityQuery('gt', ['intradaymarketcap',  MIN_MARKET_CAP]),
+        EquityQuery('gt', ['avgdailyvol3m',       MIN_AVG_VOLUME]),
+        EquityQuery('gt', ['intradayprice',       MIN_PRICE]),
+    ])
+
+    tickers = []
+    offset  = 0
+
+    while True:
+        res = yf.screen(query, sortField='avgdailyvol3m', sortAsc=False,
+                        size=SCREENER_PAGE, offset=offset)
+        quotes = res.get('quotes', [])
+        if not quotes:
+            break
+        tickers.extend(q['symbol'] for q in quotes if 'symbol' in q)
+        offset += len(quotes)
+        if offset >= res.get('total', 0):
+            break
+
+    return tickers
 
 
 # -----------------------------
-# TREND / VOLUME CHECKS
+# STEP 2: TREND CHECK ON PRICE HISTORY
 # -----------------------------
-def is_uptrend(close):
+def is_uptrend(close: pd.Series) -> bool:
     sma20 = close.rolling(20).mean()
-    if len(close) < 30 or pd.isna(sma20.iloc[-1]):
+    if len(close) < 30 or pd.isna(sma20.iloc[-1]) or pd.isna(sma20.iloc[-5]):
         return False
     return float(close.iloc[-1]) > float(sma20.iloc[-1]) > float(sma20.iloc[-5])
 
 
-def has_volume(volume):
-    avg = float(volume.rolling(20).mean().iloc[-1])
-    return avg > MIN_AVG_VOLUME and float(volume.iloc[-1]) > 0.5 * avg
-
-
 # -----------------------------
-# BATCH SCANNER
+# STEP 3: BATCH HISTORY DOWNLOAD + TREND FILTER
 # -----------------------------
-def scan_batch(batch):
+def scan_batch(batch: list) -> list:
     results = []
     try:
         raw = yf.download(
@@ -70,7 +69,7 @@ def scan_batch(batch):
             threads=False,
         )
     except Exception as e:
-        print(f"  Batch download error: {e}")
+        print(f"Batch error: {e}")
         return results
 
     for ticker in batch:
@@ -80,26 +79,23 @@ def scan_batch(batch):
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
             else:
-                if ticker not in raw.columns.get_level_values(0):
+                lvl0 = raw.columns.get_level_values(0)
+                if ticker not in lvl0:
                     continue
                 df = raw[ticker].copy()
 
             df = df.dropna(how="all").tail(LOOKBACK)
-            if df.empty or len(df) < 30:
+            close = df["Close"].dropna()
+
+            if len(close) < 30:
                 continue
 
-            close  = df["Close"].dropna()
-            volume = df["Volume"].dropna()
-
-            if float(close.iloc[-1]) < MIN_PRICE:
-                continue
-
-            if is_uptrend(close) and has_volume(volume):
+            if is_uptrend(close):
+                avg_vol = int(df["Volume"].dropna().rolling(20).mean().iloc[-1])
                 results.append({
                     "Ticker":     ticker,
                     "Last Price": round(float(close.iloc[-1]), 2),
-                    "Avg Volume": int(volume.rolling(20).mean().iloc[-1]),
-                    "Status":     "PASS",
+                    "Avg Volume": avg_vol,
                 })
         except Exception:
             pass
@@ -108,13 +104,14 @@ def scan_batch(batch):
 
 
 # -----------------------------
-# RUN SCREENER
+# MAIN
 # -----------------------------
-print("Fetching US ticker list...")
-tickers = fetch_us_tickers()
+print("Step 1: Fetching valid US equity candidates via screener...")
+candidates = get_candidate_tickers()
+print(f"  {len(candidates)} candidates (vol > {MIN_AVG_VOLUME:,}, price > ${MIN_PRICE})\n")
 
-batches = [tickers[i:i + BATCH_SIZE] for i in range(0, len(tickers), BATCH_SIZE)]
-print(f"Scanning {len(tickers)} tickers in {len(batches)} batches of {BATCH_SIZE}...")
+batches = [candidates[i:i + BATCH_SIZE] for i in range(0, len(candidates), BATCH_SIZE)]
+print(f"Step 2: Checking uptrend on {len(batches)} batches of {BATCH_SIZE}...")
 
 results = []
 for batch in tqdm(batches, unit="batch"):
@@ -123,11 +120,11 @@ for batch in tqdm(batches, unit="batch"):
 # -----------------------------
 # OUTPUT
 # -----------------------------
-df_results = pd.DataFrame(results)
+df_out = pd.DataFrame(results)
 
-if df_results.empty:
-    print("\nNo stocks matched your criteria.")
+if df_out.empty:
+    print("\nNo stocks matched the momentum criteria.")
 else:
-    df_results = df_results.sort_values("Avg Volume", ascending=False).reset_index(drop=True)
-    print(f"\n{len(df_results)} stocks passed the screener:\n")
-    print(df_results.to_string(index=False))
+    df_out = df_out.sort_values("Avg Volume", ascending=False).reset_index(drop=True)
+    print(f"\n{len(df_out)} stocks in uptrend with sufficient liquidity:\n")
+    print(df_out.to_string(index=False))
