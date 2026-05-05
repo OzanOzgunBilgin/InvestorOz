@@ -2,23 +2,26 @@
 """
 InvestorOz -- Paper Trading Backtest
 
-SELECTION METRICS (0-6 points, 1 per metric):
-  1. Price above SMA50        -- confirmed long-term uptrend
-  2. SMA20 > SMA50            -- moving average alignment (momentum structure)
-  3. RSI between 40 and 68   -- healthy: not oversold, not overbought
-  4. MACD above signal line   -- short-term bullish momentum
-  5. 5-day vol > 20-day vol   -- expanding volume (rising interest)
-  6. ATR/Price 1%-4.5%        -- optimal volatility range
+SELECTION METRICS (0-8 points, 1 per metric; m7/m8 disabled by default):
+  1. Price above SMA50              -- confirmed long-term uptrend
+  2. SMA20 > SMA50                  -- moving average alignment (momentum structure)
+  3. RSI between 40 and 68         -- healthy: not oversold, not overbought
+  4. MACD above signal line         -- short-term bullish momentum
+  5. 5-day vol > 20-day vol         -- expanding volume (rising interest)
+  6. ATR/Price 1%-4.5%              -- optimal volatility range
+  7. |Price - EMA10| / Price < 5%  -- not extended; close to short-term mean
+  8. |EMA10 - EMA21| / Price < 2%  -- EMAs converging / coiling
 
 TRADING RULES:
   Entry         : Equal-weight buy at first open price on/after SIM_START
                   Reinvestment: freed capital is immediately redeployed into
                   the next highest-scored candidate not currently held
-  Stop-Loss     : Closes position at -7% from entry
-  Take-Profit   : Closes position at +15% from entry
-  Trailing Stop : Closes position if price drops 6% from its rolling peak
+  Stop-Loss     : Closes position at -3% from entry
+  Take-Profit   : Closes position at +25% from entry
+  Trailing Stop : Closes position if price drops 5% from its rolling peak
                   (tight trail drives rapid capital recycling into new positions)
-  Universe      : Top 500 liquid US equities ($500M+ cap, 500k+ vol, $5+ price)
+  Universe      : S&P 500 + S&P 400 constituents (~900 stocks, Wikipedia)
+                  Historical filter: price >= $5, avg vol >= 500k during warmup
 """
 
 import yfinance as yf
@@ -33,13 +36,25 @@ INITIAL_CAPITAL   = 10_000
 N_STOCKS          = 3        # optimized: top 3 scored stocks
 HIST_MIN_PRICE    = 5.0      # min price as of DATA_START (historical, not today)
 HIST_MIN_VOL      = 500_000  # min avg daily volume during warmup window (historical)
-STOP_LOSS_PCT     = 0.07     # optimized: -7% stop-loss
-TAKE_PROFIT_PCT   = 0.15     # optimized: +15% take-profit
-TRAILING_STOP_PCT = 0.06     # optimized: -6% trailing stop from peak
+STOP_LOSS_PCT     = 0.03     # optimized: -3% stop-loss
+TAKE_PROFIT_PCT   = 0.25     # optimized: +25% take-profit
+TRAILING_STOP_PCT = 0.05     # optimized: -5% trailing stop from peak
 
 SIM_START  = date(2025, 1, 2)    # first trading day of 2025
 SIM_END    = date(2025, 12, 31)  # last trading day of 2025
 DATA_START = date(2024, 5, 1)    # ~6 months before SIM_START for indicator warmup
+
+# Toggle individual selection metrics on/off
+METRICS_ENABLED = {
+    "AboveSMA50":  True,   # m1: price > 50-day SMA
+    "MA_Aligned":  True,   # m2: 20-day SMA > 50-day SMA
+    "RSI_Healthy": True,   # m3: RSI between 40 and 68
+    "MACD_Bull":   True,   # m4: MACD line > signal line
+    "VolExpand":   True,   # m5: 5-day avg volume > 20-day avg volume
+    "ATR_OK":      True,   # m6: ATR/Price between 1% and 4.5%
+    "NearEMA10":   True,   # m7: |price - EMA10| / price < 5%
+    "EMACoil":     True,   # m8: |EMA10 - EMA21| / price < 2%
+}
 
 
 # -------- HELPERS --------
@@ -168,9 +183,64 @@ def filter_universe_historically(tickers, price_data):
 
 # -------- STEP 3: SCORE & SELECT (pre-SIM_START data only) --------
 
+def _score_ticker(df, cutoff_date):
+    """
+    Score a single ticker using data up to (but not including) cutoff_date.
+    Returns score (int) and price (float), or (None, None) if insufficient data.
+    """
+    hist = df[df.index.date < cutoff_date].copy()
+    if len(hist) < 60:
+        return None, None
+
+    close  = hist["Close"].astype(float)
+    volume = hist["Volume"].astype(float)
+    high   = hist["High"].astype(float)
+    low    = hist["Low"].astype(float)
+
+    sma20       = close.rolling(20).mean()
+    sma50       = close.rolling(50).mean()
+    ema10       = close.ewm(span=10, adjust=False).mean()
+    ema12       = close.ewm(span=12, adjust=False).mean()
+    ema21       = close.ewm(span=21, adjust=False).mean()
+    ema26       = close.ewm(span=26, adjust=False).mean()
+    macd_line   = ema12 - ema26
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    rsi         = compute_rsi(close)
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low  - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    atr_pct = float(tr.rolling(14).mean().iloc[-1]) / float(close.iloc[-1])
+
+    c  = float(close.iloc[-1])
+    r  = float(rsi.iloc[-1])
+    m1 = int(c > float(sma50.iloc[-1]))
+    m2 = int(float(sma20.iloc[-1]) > float(sma50.iloc[-1]))
+    m3 = int(40 <= r <= 68)
+    m4 = int(float(macd_line.iloc[-1]) > float(macd_signal.iloc[-1]))
+    m5 = int(float(volume.rolling(5).mean().iloc[-1]) >
+             float(volume.rolling(20).mean().iloc[-1]))
+    m6 = int(0.01 <= atr_pct <= 0.045)
+    m7 = int(abs(c - float(ema10.iloc[-1])) / c < 0.05)
+    m8 = int(abs(float(ema10.iloc[-1]) - float(ema21.iloc[-1])) / c < 0.02)
+
+    m1 = m1 if METRICS_ENABLED["AboveSMA50"]  else 0
+    m2 = m2 if METRICS_ENABLED["MA_Aligned"]   else 0
+    m3 = m3 if METRICS_ENABLED["RSI_Healthy"]  else 0
+    m4 = m4 if METRICS_ENABLED["MACD_Bull"]    else 0
+    m5 = m5 if METRICS_ENABLED["VolExpand"]    else 0
+    m6 = m6 if METRICS_ENABLED["ATR_OK"]       else 0
+    m7 = m7 if METRICS_ENABLED["NearEMA10"]    else 0
+    m8 = m8 if METRICS_ENABLED["EMACoil"]      else 0
+
+    return m1+m2+m3+m4+m5+m6+m7+m8, round(c, 2)
+
+
 def score_and_select(tickers, price_data):
     """
-    Score each stock on 6 technical metrics using ONLY data before SIM_START.
+    Score each stock on up to 8 technical metrics using ONLY data before SIM_START.
     This simulates what a trader would have seen at the start of the period.
     """
     rows = []
@@ -178,43 +248,42 @@ def score_and_select(tickers, price_data):
         df = price_data.get(ticker)
         if df is None:
             continue
-        hist = df[df.index.date < SIM_START].copy()
-        if len(hist) < 60:
+        score, price = _score_ticker(df, SIM_START)
+        if score is None:
             continue
-
+        hist = df[df.index.date < SIM_START]
         close  = hist["Close"].astype(float)
         volume = hist["Volume"].astype(float)
         high   = hist["High"].astype(float)
         low    = hist["Low"].astype(float)
-
         sma20       = close.rolling(20).mean()
         sma50       = close.rolling(50).mean()
+        ema10       = close.ewm(span=10, adjust=False).mean()
         ema12       = close.ewm(span=12, adjust=False).mean()
+        ema21       = close.ewm(span=21, adjust=False).mean()
         ema26       = close.ewm(span=26, adjust=False).mean()
         macd_line   = ema12 - ema26
         macd_signal = macd_line.ewm(span=9, adjust=False).mean()
         rsi         = compute_rsi(close)
-
         tr = pd.concat([
             high - low,
             (high - close.shift()).abs(),
             (low  - close.shift()).abs(),
         ], axis=1).max(axis=1)
         atr_pct = float(tr.rolling(14).mean().iloc[-1]) / float(close.iloc[-1])
-
         c  = float(close.iloc[-1])
         r  = float(rsi.iloc[-1])
-        m1 = int(c > float(sma50.iloc[-1]))
-        m2 = int(float(sma20.iloc[-1]) > float(sma50.iloc[-1]))
-        m3 = int(40 <= r <= 68)
-        m4 = int(float(macd_line.iloc[-1]) > float(macd_signal.iloc[-1]))
-        m5 = int(float(volume.rolling(5).mean().iloc[-1]) >
-                 float(volume.rolling(20).mean().iloc[-1]))
-        m6 = int(0.01 <= atr_pct <= 0.045)
-
+        m1 = int(c > float(sma50.iloc[-1])) if METRICS_ENABLED["AboveSMA50"]  else 0
+        m2 = int(float(sma20.iloc[-1]) > float(sma50.iloc[-1])) if METRICS_ENABLED["MA_Aligned"]   else 0
+        m3 = int(40 <= r <= 68) if METRICS_ENABLED["RSI_Healthy"]  else 0
+        m4 = int(float(macd_line.iloc[-1]) > float(macd_signal.iloc[-1])) if METRICS_ENABLED["MACD_Bull"]    else 0
+        m5 = int(float(volume.rolling(5).mean().iloc[-1]) > float(volume.rolling(20).mean().iloc[-1])) if METRICS_ENABLED["VolExpand"]    else 0
+        m6 = int(0.01 <= atr_pct <= 0.045) if METRICS_ENABLED["ATR_OK"]       else 0
+        m7 = int(abs(c - float(ema10.iloc[-1])) / c < 0.05) if METRICS_ENABLED["NearEMA10"]    else 0
+        m8 = int(abs(float(ema10.iloc[-1]) - float(ema21.iloc[-1])) / c < 0.02) if METRICS_ENABLED["EMACoil"]      else 0
         rows.append({
             "Ticker":      ticker,
-            "Score":       m1+m2+m3+m4+m5+m6,
+            "Score":       m1+m2+m3+m4+m5+m6+m7+m8,
             "Price":       round(c, 2),
             "RSI":         round(r, 1),
             "AboveSMA50":  bool(m1),
@@ -223,11 +292,34 @@ def score_and_select(tickers, price_data):
             "MACD_Bull":   bool(m4),
             "VolExpand":   bool(m5),
             "ATR_OK":      bool(m6),
+            "NearEMA10":   bool(m7),
+            "EMACoil":     bool(m8),
         })
 
     return (pd.DataFrame(rows)
             .sort_values(["Score", "Price"], ascending=[False, False])
             .reset_index(drop=True))
+
+
+def best_candidate_on_day(candidates, price_data, day, exclude):
+    """
+    Re-score all candidates using data up to `day` and return the highest-scoring
+    ticker not in `exclude`. This is called at reinvestment time so the replacement
+    stock is evaluated on current market conditions, not the original SIM_START score.
+    """
+    best_ticker, best_score, best_price = None, -1, 0
+    for ticker in candidates:
+        if ticker in exclude:
+            continue
+        df = price_data.get(ticker)
+        if df is None:
+            continue
+        score, price = _score_ticker(df, day)
+        if score is None:
+            continue
+        if score > best_score or (score == best_score and price > best_price):
+            best_score, best_price, best_ticker = score, price, ticker
+    return best_ticker
 
 
 # -------- STEP 4: BACKTEST ENGINE --------
@@ -292,9 +384,9 @@ def run_backtest(selected, scores_df, price_data):
             continue
         positions.append(Position(ticker, entry_px, alloc / entry_px, entry_dt))
 
-    # Ranked queue of candidates not in the initial selection — used for reinvestment
+    # Pool of candidates for reinvestment (all non-initial stocks with data)
     initial_set = set(selected)
-    candidate_queue = [
+    candidate_pool = [
         t for t in scores_df["Ticker"].tolist()
         if t not in initial_set and t in price_data
     ]
@@ -315,26 +407,24 @@ def run_backtest(selected, scores_df, price_data):
                 cash += freed
                 pending_reinvest.append(freed)
 
-        # --- Reinvest: one new position per closed slot ---
+        # --- Reinvest: re-score candidates on this day, pick best available ---
         if pending_reinvest:
-            open_tickers = {p.ticker for p in positions if p.is_open}
             for invest_amount in pending_reinvest:
-                while candidate_queue:
-                    next_ticker = candidate_queue.pop(0)
-                    if next_ticker in open_tickers:
-                        continue
-                    df = price_data.get(next_ticker)
-                    if df is None:
-                        continue
-                    entry_px, entry_dt = entry_on(df, day)
-                    if entry_px is None:
-                        continue
-                    positions.append(
-                        Position(next_ticker, entry_px, invest_amount / entry_px, entry_dt)
-                    )
-                    cash -= invest_amount
-                    open_tickers.add(next_ticker)
-                    break
+                open_tickers = {p.ticker for p in positions if p.is_open}
+                exclude = open_tickers | initial_set
+                next_ticker = best_candidate_on_day(candidate_pool, price_data, day, exclude)
+                if next_ticker is None:
+                    cash += invest_amount
+                    continue
+                df = price_data.get(next_ticker)
+                entry_px, entry_dt = entry_on(df, day)
+                if entry_px is None:
+                    cash += invest_amount
+                    continue
+                positions.append(
+                    Position(next_ticker, entry_px, invest_amount / entry_px, entry_dt)
+                )
+                cash -= invest_amount
 
         # --- Mark-to-market ---
         open_val = sum(

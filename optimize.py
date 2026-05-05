@@ -30,6 +30,18 @@ SIM_START  = date(2025, 1, 2)    # first trading day of 2025
 SIM_END    = date(2025, 12, 31)  # last trading day of 2025
 DATA_START = date(2024, 5, 1)    # warmup window for indicators
 
+# Toggle individual selection metrics on/off (must match backtest.py)
+METRICS_ENABLED = {
+    "AboveSMA50":  True,   # m1: price > 50-day SMA
+    "MA_Aligned":  True,   # m2: 20-day SMA > 50-day SMA
+    "RSI_Healthy": True,   # m3: RSI between 40 and 68
+    "MACD_Bull":   True,   # m4: MACD line > signal line
+    "VolExpand":   True,   # m5: 5-day avg volume > 20-day avg volume
+    "ATR_OK":      True,   # m6: ATR/Price between 1% and 4.5%
+    "NearEMA10":   True,   # m7: |price - EMA10| / price < 5%
+    "EMACoil":     True,   # m8: |EMA10 - EMA21| / price < 2%
+}
+
 # Grid search space
 GRID = {
     "n_stocks":      [3, 5, 7, 10],
@@ -140,6 +152,58 @@ def filter_universe_historically(tickers, price_data):
 
 # -------- SCORING (runs once, before SIM_START) --------
 
+def _score_ticker(df, cutoff_date):
+    """Score a single ticker up to cutoff_date. Returns (score, price) or (None, None)."""
+    hist = df[df.index.date < cutoff_date].copy()
+    if len(hist) < 60:
+        return None, None
+
+    close  = hist["Close"].astype(float)
+    volume = hist["Volume"].astype(float)
+    high   = hist["High"].astype(float)
+    low    = hist["Low"].astype(float)
+
+    sma20       = close.rolling(20).mean()
+    sma50       = close.rolling(50).mean()
+    ema10       = close.ewm(span=10, adjust=False).mean()
+    ema12       = close.ewm(span=12, adjust=False).mean()
+    ema21       = close.ewm(span=21, adjust=False).mean()
+    ema26       = close.ewm(span=26, adjust=False).mean()
+    macd_line   = ema12 - ema26
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    rsi         = compute_rsi(close)
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low  - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+    atr_pct = float(tr.rolling(14).mean().iloc[-1]) / float(close.iloc[-1])
+
+    c  = float(close.iloc[-1])
+    r  = float(rsi.iloc[-1])
+    m1 = int(c > float(sma50.iloc[-1]))
+    m2 = int(float(sma20.iloc[-1]) > float(sma50.iloc[-1]))
+    m3 = int(40 <= r <= 68)
+    m4 = int(float(macd_line.iloc[-1]) > float(macd_signal.iloc[-1]))
+    m5 = int(float(volume.rolling(5).mean().iloc[-1]) >
+             float(volume.rolling(20).mean().iloc[-1]))
+    m6 = int(0.01 <= atr_pct <= 0.045)
+    m7 = int(abs(c - float(ema10.iloc[-1])) / c < 0.05)
+    m8 = int(abs(float(ema10.iloc[-1]) - float(ema21.iloc[-1])) / c < 0.02)
+
+    m1 = m1 if METRICS_ENABLED["AboveSMA50"]  else 0
+    m2 = m2 if METRICS_ENABLED["MA_Aligned"]   else 0
+    m3 = m3 if METRICS_ENABLED["RSI_Healthy"]  else 0
+    m4 = m4 if METRICS_ENABLED["MACD_Bull"]    else 0
+    m5 = m5 if METRICS_ENABLED["VolExpand"]    else 0
+    m6 = m6 if METRICS_ENABLED["ATR_OK"]       else 0
+    m7 = m7 if METRICS_ENABLED["NearEMA10"]    else 0
+    m8 = m8 if METRICS_ENABLED["EMACoil"]      else 0
+
+    return m1+m2+m3+m4+m5+m6+m7+m8, round(c, 2)
+
+
 def score_all(tickers, price_data):
     print(f"Scoring {len(tickers)} stocks as of {SIM_START}...")
     rows = []
@@ -147,54 +211,10 @@ def score_all(tickers, price_data):
         df = price_data.get(ticker)
         if df is None:
             continue
-        hist = df[df.index.date < SIM_START].copy()
-        if len(hist) < 60:
+        score, price = _score_ticker(df, SIM_START)
+        if score is None:
             continue
-
-        close  = hist["Close"].astype(float)
-        volume = hist["Volume"].astype(float)
-        high   = hist["High"].astype(float)
-        low    = hist["Low"].astype(float)
-
-        sma20       = close.rolling(20).mean()
-        sma50       = close.rolling(50).mean()
-        ema12       = close.ewm(span=12, adjust=False).mean()
-        ema26       = close.ewm(span=26, adjust=False).mean()
-        macd_line   = ema12 - ema26
-        macd_signal = macd_line.ewm(span=9, adjust=False).mean()
-        rsi         = compute_rsi(close)
-
-        tr = pd.concat([
-            high - low,
-            (high - close.shift()).abs(),
-            (low  - close.shift()).abs(),
-        ], axis=1).max(axis=1)
-        atr_pct = float(tr.rolling(14).mean().iloc[-1]) / float(close.iloc[-1])
-
-        c  = float(close.iloc[-1])
-        r  = float(rsi.iloc[-1])
-        m1 = int(c > float(sma50.iloc[-1]))
-        m2 = int(float(sma20.iloc[-1]) > float(sma50.iloc[-1]))
-        m3 = int(40 <= r <= 68)
-        m4 = int(float(macd_line.iloc[-1]) > float(macd_signal.iloc[-1]))
-        m5 = int(float(volume.rolling(5).mean().iloc[-1]) >
-                 float(volume.rolling(20).mean().iloc[-1]))
-        m6 = int(0.01 <= atr_pct <= 0.045)
-
-        # m7: relative strength vs SPY over 63 trading days (~3 months)
-        spy_hist = price_data.get("SPY")
-        if spy_hist is not None:
-            spy_pre = spy_hist[spy_hist.index.date < SIM_START]["Close"].astype(float)
-            if len(spy_pre) >= 63 and len(close) >= 63:
-                stock_rs = float(close.iloc[-1]) / float(close.iloc[-63]) - 1
-                spy_rs   = float(spy_pre.iloc[-1]) / float(spy_pre.iloc[-63]) - 1
-                m7 = int(stock_rs > spy_rs)
-            else:
-                m7 = 0
-        else:
-            m7 = 0
-
-        rows.append({"Ticker": ticker, "Score": m1+m2+m3+m4+m5+m6+m7, "Price": c})
+        rows.append({"Ticker": ticker, "Score": score, "Price": price})
 
     df_scores = (pd.DataFrame(rows)
                  .sort_values(["Score", "Price"], ascending=[False, False])
