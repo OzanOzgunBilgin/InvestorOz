@@ -1,0 +1,104 @@
+Fetching universe from Wikipedia (S&P 500 + S&P 400)...
+  503 candidates (S&P 500 + S&P 400)
+
+Downloading OHLCV (2024-05-01 to 2025-12-31) for 504 tickers...
+  Data loaded for 504 tickers
+  469 stocks passed historical filters (price >= $5.0, avg vol >= 500,000 during warmup)
+
+Scoring stocks as of 2025-01-02 (using warmup data from 2024-05-01)...
+
+============================================================================
+  TOP SCORED STOCKS AS OF 2025-01-02
+  Metrics: AboveSMA50 | MA_Aligned | RSI_Healthy | MACD_Bull | VolExpand | ATR_OK
+============================================================================
+Ticker  Score  Price  RSI  AboveSMA50  MA_Aligned  RSI_Healthy  MACD_Bull  VolExpand  ATR_OK
+  ULTA      5 434.93 65.1        True        True         True       True      False    True
+  VRSN      5 204.41 63.1        True        True         True       True      False    True
+   TER      5 125.32 64.7        True        True         True       True      False    True
+     L      5  84.41 53.9        True        True         True       True      False    True
+  SWKS      5  84.09 55.0        True        True         True       True      False    True
+  DLTR      5  74.94 58.0        True        True         True       True      False    True
+   EQT      5  45.43 63.4        True        True         True       True      False    True
+   KMI      5  25.99 58.1        True        True         True       True      False    True
+  EQIX      4 916.75 42.3        True        True         True      False      False    True
+    GS      4 558.23 43.4        True        True         True      False      False    True
+    MA      4 521.88 47.6        True        True         True      False      False    True
+  CRWD      4 342.16 48.1        True        True         True      False      False    True
+   GEV      4 327.96 50.8        True        True         True      False      False    True
+   WST      4 325.95 58.9        True        True         True      False      False    True
+     V      4 313.17 55.6        True        True         True      False      False    True
+============================================================================
+
+Selected for paper trading: ULTA, VRSN, TER
+Rules: Stop-loss -7% | Take-profit +15% | Trailing stop -6% from peak
+
+Running day-by-day simulation with reinvestment...
+
+============================================================================
+                INVESTOROZ -- PAPER TRADING BACKTEST REPORT                 
+============================================================================
+  Simulation period  : 2025-01-02  to  2025-12-31
+  Starting capital   : $ 10,000.00
+  Final value        : $ 16,147.05
+  Total return       :   +61.47%
+  SPY benchmark      :   +18.01%   |  alpha vs SPY: +43.46%
+  Sharpe ratio       :     1.85  (annualized)
+  Max drawdown       :   -13.07%
+  Win / Loss trades  : 20 wins  /  13 losses  (30 reinvestments)
+
+----------------------------------------------------------------------------
+  TICKER   BUY DATE     SELL DATE        ENTRY      EXIT     P&L $   P&L %  REASON
+----------------------------------------------------------------------------
+  ULTA     2025-01-02   2025-01-13   $  434.83 $  403.94 $ 236.80  -7.1%  Stop-loss (-7.1%)
+  TER      2025-01-02   2025-01-24   $  126.16 $  129.30 +$  83.10  +2.5%  Trailing stop (-7.2% from peak)
+  VRSN     2025-01-02   2025-03-19   $  207.41 $  239.23 +$ 511.27  +15.3%  Take-profit (+15.3%)
+  L        2025-01-13   2025-04-04   $   80.46 $   82.91 +$  94.43  +3.0%  Trailing stop (-9.7% from peak)
+  SWKS     2025-01-24   2025-02-03   $   87.53 $   80.81 $ 262.40  -7.7%  Stop-loss (-7.7%)
+  DLTR     2025-02-03   2025-03-03   $   71.06 $   68.77 $ 101.64  -3.2%  Trailing stop (-9.9% from peak)
+  EQT      2025-03-03   2025-03-06   $   48.28 $   45.62 $ 168.08  -5.5%  Trailing stop (-7.9% from peak)
+  KMI      2025-03-06   2025-04-04   $   25.32 $   24.24 $ 122.32  -4.2%  Trailing stop (-12.6% from peak)
+  EQIX     2025-03-19   2025-04-04   $  827.14 $  748.85 $ 363.92  -9.5%  Stop-loss (-9.5%)
+  MA       2025-04-04   2025-04-07   $  515.75 $  481.90 $ 181.25  -6.6%  Trailing stop (-6.6% from peak)
+  GS       2025-04-04   2025-05-02   $  477.12 $  554.61 +$ 518.29  +16.2%  Take-profit (+16.2%)
+  CRWD     2025-04-04   2025-04-09   $  328.02 $  378.01 +$ 530.45  +15.2%  Take-profit (+15.2%)
+  GEV      2025-04-07   2025-04-09   $  256.26 $  325.85 +$ 700.76  +27.2%  Take-profit (+27.2%)
+  V        2025-04-09   2025-05-09   $  303.37 $  349.92 +$ 503.54  +15.3%  Take-profit (+15.3%)
+  WST      2025-04-09   2025-04-23   $  188.85 $  217.25 +$ 603.17  +15.0%  Take-profit (+15.0%)
+  WTW      2025-04-23   2025-04-25   $  320.88 $  298.65 $ 319.76  -6.9%  Trailing stop (-6.9% from peak)
+  CDNS     2025-04-25   2025-05-27   $  279.99 $  323.08 +$ 660.92  +15.4%  Take-profit (+15.4%)
+  AXP      2025-05-02   2025-06-27   $  271.65 $  313.90 +$ 576.86  +15.6%  Take-profit (+15.6%)
+  ROK      2025-05-09   2025-07-01   $  289.71 $  334.92 +$ 590.64  +15.6%  Take-profit (+15.6%)
+  FFIV     2025-05-27   2025-09-02   $  285.66 $  306.73 +$ 365.51  +7.4%  Trailing stop (-6.0% from peak)
+  AAPL     2025-06-27   2025-08-13   $  201.28 $  232.89 +$ 673.09  +15.7%  Take-profit (+15.7%)
+  JPM      2025-07-01   2025-10-22   $  285.34 $  291.30 +$  91.36  +2.1%  Trailing stop (-6.5% from peak)
+  RL       2025-08-13   2025-11-03   $  298.89 $  313.29 +$ 238.96  +4.8%  Trailing stop (-6.7% from peak)
+  CME      2025-09-02   2025-12-10   $  258.22 $  258.92 +$  14.43  +0.3%  Trailing stop (-6.6% from peak)
+  AMZN     2025-10-22   2025-11-03   $  219.30 $  254.00 +$ 706.82  +15.8%  Take-profit (+15.8%)
+  HON      2025-11-03   2025-11-20   $  199.14 $  187.21 $ 311.46  -6.0%  Trailing stop (-6.1% from peak)
+  DECK     2025-11-03   2025-12-03   $   81.50 $   94.97 +$ 855.11  +16.5%  Take-profit (+16.5%)
+  GOOG     2025-11-20   2025-12-17   $  304.33 $  297.85 $ 104.00  -2.1%  Trailing stop (-7.8% from peak)
+  GOOGL    2025-12-03   2025-12-17   $  315.46 $  296.51 $ 362.17  -6.0%  Trailing stop (-7.6% from peak)
+  EXPE     2025-12-10   2025-12-31   $  262.68 $  282.70 +$ 406.57  +7.6%  End of simulation (still held)
+  WSM      2025-12-17   2025-12-31   $  185.42 $  177.32 $ 247.61  -4.4%  Trailing stop (-6.5% from peak)
+  TTWO     2025-12-17   2025-12-31   $  244.69 $  256.03 +$ 221.65  +4.6%  End of simulation (still held)
+  DRI      2025-12-31   2025-12-31   $  181.88 $  181.26 $  18.49  -0.3%  End of simulation (still held)
+----------------------------------------------------------------------------
+  NET P&L                                            +$6147.05  (+61.47%)
+============================================================================
+
+  MONTHLY EQUITY CURVE  (each bar char ~2% return)
+  ------------  ---------------  --------  chart
+  2025-01-01    $      9,873.50    -1.26%  -
+  2025-02-01    $      9,881.60    -1.18%  -
+  2025-03-01    $     10,201.38  +   2.01%  +
+  2025-04-01    $     10,373.26  +   3.73%  +
+  2025-05-01    $     11,902.88  +  19.03%  +++++++++
+  2025-06-01    $     13,052.48  +  30.52%  +++++++++++++++
+  2025-07-01    $     13,914.79  +  39.15%  +++++++++++++++++++
+  2025-08-01    $     14,003.42  +  40.03%  ++++++++++++++++++++
+  2025-09-01    $     14,939.22  +  49.39%  ++++++++++++++++++++++++
+  2025-10-01    $     15,260.87  +  52.61%  +++++++++++++++++++++++++
+  2025-11-01    $     15,547.93  +  55.48%  +++++++++++++++++++++++++
+  2025-12-01    $     16,483.89  +  64.84%  +++++++++++++++++++++++++
+  2025-12-31    $     16,147.05  +  61.47%  +++++++++++++++++++++++++
+============================================================================
