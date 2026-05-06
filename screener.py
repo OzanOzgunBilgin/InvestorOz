@@ -413,7 +413,7 @@ def print_results(df, sectors=None):
     enabled_metrics = [k for k, v in METRICS_ENABLED.items() if v]
     max_score = len(enabled_metrics)
 
-    W = 90
+    W = 95
     sector_label = f"  Sectors: {' | '.join(sectors)}" if sectors else ""
     print()
     print("=" * W)
@@ -432,9 +432,9 @@ def print_results(df, sectors=None):
     print("-" * W)
 
     top = df.head(TOP_N)
-    header = (f"{'#':>3}  {'Ticker':<8} {'Score':>6}  {'Price':>8}  {'RSI':>5}  RS10d  "
-              f"{'SMA50':>6} {'MAlign':>6} {'RSI':>5} {'MACD':>5} "
-              f"{'Vol':>5} {'ATR':>5} {'NrE10':>6} {'Coil':>5} {'vSPY':>5}")
+    header = (f"{'#':>3}  {'Ticker':<8} {'Score':>6}  {'Price':>8}  {'RSI':>5}  RS10d%  "
+              f"{'SMA':>4} {'MAlg':>4} {'RsiH':>4} {'MACD':>4} "
+              f"{'Vol':>4} {'ATR':>4} {'EMA':>4} {'Coil':>4} {'vSPY':>4}")
     print(header)
     print("-" * W)
     for i, row in top.iterrows():
